@@ -1,0 +1,64 @@
+name: Decode NpcString DAT
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  decode:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ make git
+
+      - name: Build open-l2encdec
+        run: |
+          git clone --depth 1 https://github.com/ritsuwastaken/open-l2encdec.git
+          cmake -S open-l2encdec -B open-l2encdec/build \
+            -DL2ENCDEC_BUILD_CLI=ON \
+            -DL2ENCDEC_BUILD_TESTS=OFF \
+            -DBUILD_SHARED_LIBS=OFF
+          cmake --build open-l2encdec/build --config Release --parallel 2
+
+      - name: Decode NpcString-eu.dat
+        run: |
+          mkdir -p decoded
+          DECODER="$GITHUB_WORKSPACE/open-l2encdec/build/cli/l2encdec"
+          chmod +x "$DECODER"
+
+          echo "Trying legacy RSA keys (protocol 413)..."
+          if "$DECODER" -c decode -l -o decoded/NpcString-eu.dec.dat NpcString-eu.dat; then
+            echo "Decoded with legacy RSA keys."
+            echo "legacy" > decoded/decode-method.txt
+          else
+            echo "Legacy decode failed; trying modern l2encdec RSA keys..."
+            rm -f decoded/NpcString-eu.dec.dat
+            "$DECODER" -c decode -o decoded/NpcString-eu.dec.dat NpcString-eu.dat
+            echo "modern" > decoded/decode-method.txt
+          fi
+
+          test -s decoded/NpcString-eu.dec.dat
+          ls -lh decoded/NpcString-eu.dec.dat
+          file decoded/NpcString-eu.dec.dat || true
+
+      - name: Upload decoded file as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NpcString-eu-decoded
+          path: decoded/
+          if-no-files-found: error
+
+      - name: Commit decoded file
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add decoded/NpcString-eu.dec.dat decoded/decode-method.txt
+          git commit -m "Add decoded NpcString-eu.dat"
+          git push
